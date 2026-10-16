@@ -87,6 +87,13 @@ impl AsyncEventStore for PostgresEventStore {
 
         if let Some(row) = inserted {
             let stored = row.into_event();
+
+            // The event and its processing job must commit together.
+            sqlx::query("INSERT INTO event_jobs (event_id) VALUES ($1)")
+                .bind(&stored.id)
+                .execute(&mut *tx)
+                .await?;
+
             tx.commit().await?;
             return Ok(StoreOutcome::Accepted(stored));
         }

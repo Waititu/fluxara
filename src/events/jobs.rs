@@ -127,6 +127,28 @@ impl PostgresJobQueue {
         worker_id: &str,
         error: &str,
     ) -> Result<(), StoreError> {
+        self.mark_failed_with_policy(event_id, worker_id, error, 2, 300)
+            .await
+    }
+
+    /// Release a failed job using a configurable exponential retry policy.
+    ///
+    /// The base delay is doubled for each failed attempt and capped at
+    /// `max_delay_seconds`. A final failed attempt is sent to dead-letter.
+    pub async fn mark_failed_with_policy(
+        &self,
+        event_id: &str,
+        worker_id: &str,
+        error: &str,
+        base_delay_seconds: i64,
+        max_delay_seconds: i64,
+    ) -> Result<(), StoreError> {
+        if base_delay_seconds < 1 || max_delay_seconds < base_delay_seconds {
+            return Err(StoreError(
+                "retry delays must satisfy 1 <= base_delay_seconds <= max_delay_seconds".to_owned(),
+            ));
+        }
+
         let result = sqlx::query(
             r#"
             UPDATE event_jobs
@@ -137,7 +159,7 @@ impl PostgresJobQueue {
                 available_at = CASE
                     WHEN attempts >= max_attempts THEN available_at
                     ELSE NOW() +
-                        (LEAST(POWER(2.0, GREATEST(attempts - 1, 0)), 300)::INTEGER
+                        (LEAST($4 * POWER(2.0, GREATEST(attempts - 1, 0)), $5)::INTEGER
                          * INTERVAL '1 second')
                 END,
                 locked_at = NULL,
@@ -152,6 +174,8 @@ impl PostgresJobQueue {
         .bind(event_id)
         .bind(worker_id)
         .bind(error)
+        .bind(base_delay_seconds as f64)
+        .bind(max_delay_seconds as f64)
         .execute(&self.pool)
         .await?;
 

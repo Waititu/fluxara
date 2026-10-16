@@ -1,0 +1,16 @@
+[package]
+name = "fluxara"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "A production-oriented asynchronous event-processing platform built in Rust"
+license = "MIT"
+
+[dependencies]
+axum = "0.8"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[dev-dependencies]

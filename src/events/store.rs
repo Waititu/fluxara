@@ -4,6 +4,7 @@ use std::{
 };
 
 use super::model::AcceptedEvent;
+use async_trait::async_trait;
 
 /// Outcome of attempting to store an event under its client-supplied ID.
 #[derive(Clone, Debug)]
@@ -24,6 +25,47 @@ pub enum StoreOutcome {
 pub trait EventStore: Clone + Send + Sync + 'static {
     fn insert(&self, event: AcceptedEvent) -> StoreOutcome;
     fn get(&self, id: &str) -> Option<AcceptedEvent>;
+}
+
+/// Error returned by asynchronous event-store implementations.
+///
+/// The internal detail is retained for structured logs but is never returned
+/// to API clients.
+#[derive(Debug)]
+pub struct StoreError(pub(crate) String);
+
+impl std::fmt::Display for StoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for StoreError {}
+
+impl From<sqlx::Error> for StoreError {
+    fn from(error: sqlx::Error) -> Self {
+        Self(error.to_string())
+    }
+}
+
+/// Async interface used by HTTP handlers. Kept separate from `EventStore`
+/// so existing synchronous in-memory tests and callers remain compatible.
+#[async_trait]
+pub trait AsyncEventStore: Send + Sync + 'static {
+    async fn insert_async(&self, event: AcceptedEvent) -> Result<StoreOutcome, StoreError>;
+
+    async fn get_async(&self, id: &str) -> Result<Option<AcceptedEvent>, StoreError>;
+}
+
+#[async_trait]
+impl AsyncEventStore for InMemoryEventStore {
+    async fn insert_async(&self, event: AcceptedEvent) -> Result<StoreOutcome, StoreError> {
+        Ok(EventStore::insert(self, event))
+    }
+
+    async fn get_async(&self, id: &str) -> Result<Option<AcceptedEvent>, StoreError> {
+        Ok(EventStore::get(self, id))
+    }
 }
 
 /// Concurrency-safe in-memory event store.

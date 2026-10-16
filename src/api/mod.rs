@@ -1,6 +1,7 @@
 pub mod events;
 
 use axum::{Json, Router, routing::get};
+use std::sync::Arc;
 use tower_http::{
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
     trace::TraceLayer,
@@ -9,7 +10,7 @@ use tower_http::{
 use crate::{
     application::{HealthService, HealthSnapshot},
     error::AppError,
-    events::InMemoryEventStore,
+    events::{AsyncEventStore, InMemoryEventStore},
 };
 
 use self::events::AppState;
@@ -32,7 +33,12 @@ pub fn router() -> Router {
 
 /// Router sharing the provided store, used by tests to isolate state.
 pub fn router_with_store(store: InMemoryEventStore) -> Router {
-    let state = AppState::new(store);
+    router_with_async_store(Arc::new(store))
+}
+
+/// Router using a shared asynchronous event store (production entry point).
+pub fn router_with_async_store(store: Arc<dyn AsyncEventStore>) -> Router {
+    let state = AppState::with_store(store);
     Router::new()
         .route("/health", get(health))
         .route("/v1/events", axum::routing::post(self::events::post_event))

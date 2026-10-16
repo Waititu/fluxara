@@ -5,23 +5,30 @@ use axum::{
     http::StatusCode,
 };
 use serde::Serialize;
+use std::sync::Arc;
 
 use crate::{
     error::AppError,
     events::{
-        AcceptedEvent, BatchRequest, EventStore, EventSubmission, InMemoryEventStore,
-        MAX_BATCH_EVENTS, MAX_REQUEST_BYTES, StoreOutcome,
+        AcceptedEvent, AsyncEventStore, BatchRequest, EventSubmission, InMemoryEventStore,
+        MAX_BATCH_EVENTS, MAX_REQUEST_BYTES, StoreError, StoreOutcome,
         validation::{EventValidationError, now_utc_rfc3339, validate_submission},
     },
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AppState {
-    pub store: InMemoryEventStore,
+    pub store: Arc<dyn AsyncEventStore>,
 }
 
 impl AppState {
     pub fn new(store: InMemoryEventStore) -> Self {
+        Self {
+            store: Arc::new(store),
+        }
+    }
+
+    pub fn with_store(store: Arc<dyn AsyncEventStore>) -> Self {
         Self { store }
     }
 }
@@ -46,6 +53,11 @@ pub struct BatchError {
 #[derive(Debug, Serialize)]
 pub struct BatchResponse {
     pub results: Vec<BatchResult>,
+}
+
+fn store_error(error: StoreError) -> AppError {
+    tracing::error!(error = %error, "event store operation failed");
+    AppError::Internal
 }
 
 fn parse_error_to_app_error(error: serde_json::Error) -> AppError {
@@ -98,7 +110,12 @@ pub async fn post_event(
     let validated = validate_submission(&submission).map_err(AppError::validation)?;
     let accepted = validated.into_accepted(now_utc_rfc3339());
 
-    match state.store.insert(accepted) {
+    match state
+        .store
+        .insert_async(accepted)
+        .await
+        .map_err(store_error)?
+    {
         StoreOutcome::Accepted(event) => Ok((StatusCode::CREATED, Json(event))),
         StoreOutcome::Duplicate(event) => Ok((StatusCode::OK, Json(event))),
         StoreOutcome::Conflict(_) => Err(AppError::Conflict),
@@ -111,7 +128,9 @@ pub async fn get_event(
 ) -> Result<Json<AcceptedEvent>, AppError> {
     state
         .store
-        .get(&id)
+        .get_async(&id)
+        .await
+        .map_err(store_error)?
         .map(Json)
         .ok_or(AppError::EventNotFound)
 }
@@ -209,7 +228,12 @@ pub async fn post_batch(
 
         let accepted = validated.into_accepted(now_utc_rfc3339());
 
-        match state.store.insert(accepted) {
+        match state
+            .store
+            .insert_async(accepted)
+            .await
+            .map_err(store_error)?
+        {
             StoreOutcome::Accepted(event) => results.push(BatchResult {
                 id,
                 status: StatusCode::CREATED.as_u16(),

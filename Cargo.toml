@@ -16,6 +16,8 @@ tower-http = { version = "0.6", features = ["request-id", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 http-body-util = "0.1"
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "json", "migrate", "macros"] }
+async-trait = "0.1"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
